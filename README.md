@@ -49,6 +49,7 @@ qemu-system-x86_64 -drive file=rendu/disk.qcow2,format=qcow2 -nographic -m 2G
 |---|---|---|
 | `root` | `Ecole2600` | démarre l'EDR|
 | `user` | `Hacker2600` | attaquant simulé |
+| `admin` | `SecretPassword` | Compte SIEM Wazuh |
 
 
 SELinux est compilé (hérité de `defconfig`) mais inactif.
@@ -63,7 +64,7 @@ docker compose -f generate-indexer-certs.yml run --rm generator   # une seule fo
 docker compose up -d
 ```
 
-Dashboard : `https://localhost` (`admin` / `SecretPassword`, certificat auto-signé)
+Dashboard : `https://localhost`)
 
 
 
