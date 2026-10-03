@@ -1,0 +1,17 @@
+# Images disque (plusieurs Go, régénérées par les scripts)
+*.img
+*.qcow2
+
+# Source du noyau et archives (retéléchargées par 0-kernel.sh)
+kernel/linux-*/
+kernel/*.tar.xz
+
+# Générés par la compilation de l'EDR
+*.o
+*.skel.h
+vmlinux.h
+
+# Temporaires
+*.log
+.t*.sh
+.envt.sh
