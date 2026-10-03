@@ -1,4 +1,4 @@
-# Mini EDR — Noyau Linux (École 2600)
+# Mini EDR - Noyau Linux (École 2600)
 
 EDR minimal pour Linux reposant sur BPF-LSM. Ce dépôt contient la plateforme de test (noyau, image LFS) et, à terme, l'EDR (`edr.bpf.c`, `edrd`, `edrctl`).
 
@@ -47,11 +47,11 @@ qemu-system-x86_64 -drive file=rendu/disk.qcow2,format=qcow2 -nographic -m 2G
 
 | Compte | Mot de passe | Rôle |
 |---|---|---|
-| `root` | `Ecole2600` | démarre l'EDR, démontre les blocages |
-| `user` | `Hacker2600` | attaquant simulé (UID 1000, sans sudo) |
+| `root` | `Ecole2600` | démarre l'EDR|
+| `user` | `Hacker2600` | attaquant simulé |
 
 
-SELinux est compilé (hérité de `defconfig`) mais inactif : il ne figure pas dans `CONFIG_LSM`.
+SELinux est compilé (hérité de `defconfig`) mais inactif.
 
 ## Contenu du dépôt
 
