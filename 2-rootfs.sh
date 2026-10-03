@@ -10,7 +10,7 @@ SCRIPT=$(cat <<'EOS'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y systemd-sysv udev login util-linux iproute2 kmod libbpf1
+apt-get install -y systemd-sysv udev login util-linux iproute2 kmod libbpf1 rsyslog
 apt-get clean
 
 # Comptes root et user (UID 1000, sans sudo) ; le compte ubuntu de l'image est retiré
@@ -41,9 +41,34 @@ WantedBy=sysinit.target
 EOF
 systemctl enable bpffs.service
 
-# --one-file-system exclut /proc, /sys, /dev et /my-rootfs (laissés en dossiers vides)
-tar -c --one-file-system -C / . | tar -x -p --numeric-owner -C /my-rootfs
-rmdir /my-rootfs/my-rootfs
+# Réseau : DHCP sur la carte QEMU
+mkdir -p /etc/systemd/network
+cat > /etc/systemd/network/20-wired.network <<'EOF'
+[Match]
+Name=en*
+
+[Network]
+DHCP=yes
+EOF
+systemctl enable systemd-networkd.service
+
+# Expéditeur : edr.log vers le manager Wazuh
+install -m 0600 /dev/null /var/log/edr.log
+sed -i 's/^\$PrivDrop/#&/' /etc/rsyslog.conf
+cat > /etc/rsyslog.d/edr.conf <<'EOF'
+module(load="imfile")
+template(name="edr_raw" type="string" string="%rawmsg%\n")
+input(type="imfile" File="/var/log/edr.log" Tag="edr" ruleset="edr_forward")
+ruleset(name="edr_forward") {
+    action(type="omfwd" target="10.0.2.2" port="514" protocol="tcp" template="edr_raw"
+           action.resumeRetryCount="-1"
+           queue.type="LinkedList" queue.filename="edr_fwd" queue.maxDiskSpace="50m" queue.saveOnShutdown="on")
+}
+EOF
+systemctl enable rsyslog.service
+
+# --one-file-system laisse /proc, /sys et /dev en dossiers vides ; /my-rootfs est exclu (il change pendant la lecture)
+tar -c --one-file-system --exclude=./my-rootfs -C / . | tar -x -p --numeric-owner -C /my-rootfs
 EOS
 )
 
