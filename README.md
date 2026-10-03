@@ -2,7 +2,6 @@
 
 EDR minimal pour Linux reposant sur BPF-LSM. Ce dépôt contient la plateforme de test (noyau, image LFS) et, à terme, l'EDR (`edr.bpf.c`, `edrd`, `edrctl`).
 
-Dépôt privé, réservé au groupe : le sujet interdit tout code similaire entre groupes.
 
 ## Plateforme
 
@@ -44,8 +43,6 @@ Les scripts se lancent depuis ce dossier, dans l'ordre. `sudo` est demandé par 
 qemu-system-x86_64 -drive file=rendu/disk.qcow2,format=qcow2 -nographic -m 2G
 ```
 
-Pour quitter QEMU : `Ctrl-A` puis `X`. Prévoir `-m 2G` : la valeur par défaut est trop faible.
-
 ## Comptes
 
 | Compte | Mot de passe | Rôle |
@@ -53,20 +50,6 @@ Pour quitter QEMU : `Ctrl-A` puis `X`. Prévoir `-m 2G` : la valeur par défaut 
 | `root` | `Ecole2600` | démarre l'EDR, démontre les blocages |
 | `user` | `Hacker2600` | attaquant simulé (UID 1000, sans sudo) |
 
-## Vérifier la plateforme
-
-Dans la VM :
-
-```
-uname -r                                                   # 7.2.8
-zcat /proc/config.gz | grep -E 'BPF_LSM|DEBUG_INFO_BTF|CONFIG_LSM='
-ls -l /sys/kernel/btf/vmlinux                              # BTF présent (CO-RE)
-mount | grep bpf                                           # bpf monté, mode=700
-mount -t securityfs securityfs /sys/kernel/security && cat /sys/kernel/security/lsm
-                                                           # contient bpf, pas selinux
-```
-
-`/sys/fs/bpf` est monté au boot par `bpffs.service`. systemd refuse une unité `.mount` pour ce chemin, d'où le service `oneshot`. `securityfs` n'est pas monté automatiquement : il ne sert qu'à cette vérification.
 
 SELinux est compilé (hérité de `defconfig`) mais inactif : il ne figure pas dans `CONFIG_LSM`.
 
