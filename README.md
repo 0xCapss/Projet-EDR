@@ -55,7 +55,7 @@ SELinux est compilé (hérité de `defconfig`) mais inactif.
 
 ## SIEM (Wazuh)
 
-Hors livrable, pour la démonstration. Wazuh 4.14.8 (manager, indexer, dashboard) tourne sous Docker Compose dans `Wazuh/wazuh-docker-4.14.8/single-node/`.
+Hors livrable, pour la démonstration. Version Wazuh 4.14.8 (manager, indexer, dashboard) tourne sous Docker Compose dans `Wazuh/wazuh-docker-4.14.8/single-node/`.
 
 ```
 cd Wazuh/wazuh-docker-4.14.8/single-node
@@ -63,23 +63,9 @@ docker compose -f generate-indexer-certs.yml run --rm generator   # une seule fo
 docker compose up -d
 ```
 
-Dashboard : `https://localhost` (`admin` / `SecretPassword`, certificat auto-signé), prêt après 1 à 2 minutes.
+Dashboard : `https://localhost` (`admin` / `SecretPassword`, certificat auto-signé)
 
-Écarts avec le déploiement officiel :
-- le manager publie `514/tcp` (syslog) et écoute dessus (bloc `<remote>` de `wazuh_manager.conf`) ;
-- l'indexer ne publie plus `9200` : il reste interne ;
-- `allowed-ips` contient `10.0.2.0/24` et `172.16.0.0/12` : le manager voit la connexion de la VM comme venant de la passerelle Docker (`172.x.x.1`) ;
-- `config/wazuh_cluster/local_rules.xml` contient les règles de l'EDR.
 
-La VM envoie `/var/log/edr.log` (une ligne JSON par événement) avec `rsyslog` vers `10.0.2.2:514`, c'est-à-dire l'hôte. Le décodeur `json` de Wazuh lit la ligne : les champs du journal (`hook`, `action`, `comm`…) servent de clés aux règles.
-
-Test de bout en bout, dans la VM :
-
-```
-echo '{"hook":"test","action":"alert","comm":"vm"}' >> /var/log/edr.log
-```
-
-Dans le dashboard : Discover, index `wazuh-alerts-*`, recherche `rule.id:100001`. Les alertes apparaissent sous l'agent `wazuh.manager` (l'EDR n'est pas un agent Wazuh).
 
 Les certificats générés ne sont pas versionnés.
 
