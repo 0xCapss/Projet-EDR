@@ -1,0 +1,7 @@
+<group name="edr,">
+    <rule id="100001" level="10">
+        <decoded_as>json</decoded_as>
+        <field name="hook">test</field>
+        <description>EDR : événement de test reçu de la VM</description>
+    </rule>
+</group>
