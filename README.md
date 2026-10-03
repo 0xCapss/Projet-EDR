@@ -25,7 +25,7 @@ Prévoir environ 15 Go libres (arbre du noyau compilé, image de 8 Go en fichier
 
 ## Fabrication
 
-Les scripts se lancent depuis ce dossier, dans l'ordre. `sudo` est demandé par les étapes qui touchent aux loop devices.
+Lancer les scripts depuis ce dossier, dans l'ordre. `sudo` sera demandé par les étapes qui touchent aux loop.
 
 | Script | Rôle |
 |---|---|
@@ -57,17 +57,10 @@ SELinux est compilé (hérité de `defconfig`) mais inactif.
 
 ```
 env.sh, 0-kernel.sh … 4-qcow2.sh   fabrication
-issue-edr2600                      bannière de connexion
 kernel/defconfig-edr               configuration minimale du noyau
 kernel/config-edr.annoté.md        options retenues et justification
 20261001-edr.pdf                   sujet
 architecture-miniEDR.pdf           architecture cible
 ```
 
-Non versionnés (voir `.gitignore`) : images disque, source du noyau, fichiers générés.
 
-## État
-
-- Noyau et système validés à la main : démarrage, flags BPF-LSM, `bpffs` persistant.
-- Chaîne `1-disk.sh` à `4-qcow2.sh` : à valider de bout en bout, puis démarrer le QCOW2 produit.
-- À faire : réseau de la VM, `edr.bpf.c`, `edrd` (+ service systemd), `edrctl`, documentation utilisateur, scénarios de démonstration.
