@@ -37,4 +37,8 @@ sudo tee "$MNT/etc/hosts" >/dev/null <<EOF
 EOF
 
 sudo ln -sf ../run/systemd/resolve/stub-resolv.conf "$MNT/etc/resolv.conf"
+
+# EDR : démon edrd, configuration et service systemd (démarré au boot)
+make -C src
+sudo make -C src install DESTDIR="$MNT"
 sudo cp issue-edr2600 "$MNT/etc/issue"

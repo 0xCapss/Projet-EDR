@@ -1,0 +1,15 @@
+[Unit]
+Description=Mini EDR daemon (BPF-LSM)
+Requires=bpffs.service
+After=bpffs.service local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/edrd
+# SIGHUP reopens /var/log/edr.log
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
