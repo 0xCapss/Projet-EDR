@@ -5,6 +5,13 @@
 #include "edr.h"
 #include <linux/errno.h>
 
+#define SIGHUP        1
+#define SIGINT        2
+#define SIGQUIT       3
+#define SIGKILL       9
+#define SIGTERM       15
+#define SIGSTOP       19
+
 char LICENSE[] SEC("license") = "GPL";
 
 /* —— Maps ———————————————————————————————— */
@@ -42,6 +49,14 @@ struct {
 	__type(key,   __u32);
 	__type(value, __u64);
 } lost_events SEC(".maps");
+
+/* PID of the daemon to protect (slot 0), written by edrd at startup; 0 = none */
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key,   __u32);
+    __type(value, __u32);
+} protected_pid_map SEC(".maps");
 
 static __always_inline void lost_inc(void)
 {
@@ -109,7 +124,6 @@ int BPF_PROG(file_open_hook, struct file *file)
 	n = bpf_d_path((struct path *)&file->f_path, path, sizeof(path));
 	if (n < 0)
 		return 0;
-
 	/* Confined process: block the forbidden prefixes */
 	p = bpf_map_lookup_elem(&jail_map, &pid);
 	if (p) {
@@ -199,4 +213,62 @@ int BPF_PROG(exec_hook, struct linux_binprm *bprm)
 
 	bpf_ringbuf_submit(e, 0);
 	return ret;
+}
+
+/* —— Hook task_kill ———————————————————————— */
+
+
+
+static __always_inline int is_signal_allowed(int sig)
+{
+	if (sig == SIGKILL || sig == SIGSTOP || sig == SIGINT || sig == SIGTERM || sig == SIGQUIT)
+		return 0;
+	else
+		return 1;
+}
+
+SEC("lsm/task_kill")
+int BPF_PROG(task_kill_hook, struct task_struct *p, struct siginfo *info, int sig, const struct cred *cred)
+{
+	__u32 zero = 0;
+	__u32 *daemon = bpf_map_lookup_elem(&protected_pid_map, &zero);
+	struct task_struct *t;
+	struct event *e;
+	u32 target = BPF_CORE_READ(p, tgid);
+	u32 sender = bpf_get_current_pid_tgid() >> 32;
+	
+	if(!daemon || *daemon == 0)
+		return 0;
+	
+	if(target != *daemon)
+		return 0;
+	
+	if(sender == 1 || sender == *daemon)
+		return 0;
+
+	if (is_signal_allowed(sig))
+		return 0;
+	
+	stats_inc(sender, ACTION_BLOCK);
+
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		lost_inc();
+		return -EPERM;
+	}
+
+	__builtin_memset(e, 0, sizeof(*e));
+	e->type = EVENT_KILL;
+	e->pid = sender;
+	e->uid = (u32)bpf_get_current_uid_gid();
+	e->action = ACTION_BLOCK;
+	e->timestamp = bpf_ktime_get_ns();
+	bpf_get_current_comm(&e->comm, sizeof(e->comm));
+	bpf_probe_read_kernel_str(e->path, sizeof(e->path), p->comm);
+	t = (struct task_struct *)bpf_get_current_task_btf();
+
+	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
+
+	bpf_ringbuf_submit(e, 0);
+	return -EPERM;
 }
