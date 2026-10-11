@@ -47,6 +47,7 @@ qemu-system-x86_64 -drive file=rendu/disk.qcow2,format=qcow2 -nographic -m 2G
 
 | Compte | Mot de passe | Rôle |
 |---|---|---|
+| `sda2` | `Disk2600` | Disque mdp |
 | `root` | `Ecole2600` | démarre l'EDR|
 | `user` | `Hacker2600` | attaquant simulé |
 | `admin` | `SecretPassword` | Compte SIEM Wazuh |
