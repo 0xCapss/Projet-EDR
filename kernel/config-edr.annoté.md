@@ -15,6 +15,8 @@ Fichiers associés :
 | `CONFIG_BPF_LSM` | `y` | Autorise les programmes `SEC("lsm/...")`. Dépend de `BPF_SYSCALL` et `SECURITY` | les 7 hooks BPF-LSM |
 | `CONFIG_LSM` | `"landlock,lockdown,yama,bpf"` | Liste ordonnée des LSM actifs au boot. `bpf` doit y figurer, sinon les programmes BPF-LSM ne sont jamais appelés | tous les hooks |
 | `CONFIG_DEBUG_INFO_BTF` | `y` | Génère `/sys/kernel/btf/vmlinux`, indispensable à CO-RE. Exige `pahole` (paquet `dwarves`) à la compilation | portabilité de `edr.bpf.c` (`vmlinux.h`) |
+| `CONFIG_FUNCTION_TRACER`, `CONFIG_DYNAMIC_FTRACE` | `y` | Le compilateur laisse un emplacement patchable (`nop`) au début de chaque fonction noyau. Un programme BPF-LSM s'attache en y branchant un trampoline BPF. **Sans ces options, l'attache échoue avec `EBUSY` (-16)**, alors que le chargement et le vérificateur réussissent. Ce n'est pas du hooking par ftrace : les hooks restent des programmes BPF-LSM, ftrace n'est qu'un prérequis du mécanisme de trampoline | tous les hooks |
+| `CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS` | `y` (déduit) | Activé automatiquement par les deux options précédentes sur x86_64 ; vérifié par `0-kernel.sh` | tous les hooks |
 
 ## 2. Options modifiées par rapport à `defconfig`
 
@@ -22,6 +24,7 @@ Fichiers associés :
 |---|---|---|---|
 | `CONFIG_DEBUG_INFO_NONE` | `y` | désactivée | Bloquait `DEBUG_INFO_BTF` |
 | `CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT` | `n` | `y` | Format DWARF requis par `DEBUG_INFO_BTF` |
+| `CONFIG_FUNCTION_TRACER` | `n` | `y` | Prérequis de l'attache des programmes BPF-LSM (voir section 1). Constaté en test : sans elle, `edr__attach` renvoie `-EBUSY` pour chaque hook |
 | `CONFIG_SECURITY_YAMA` | `n` | `y` | Restreint `ptrace` ; complète le hook `ptrace_access_check` |
 | `CONFIG_SECURITY_LOCKDOWN_LSM` | `n` | `y` | LSM de base de la liste par défaut du noyau |
 | `CONFIG_SECURITY_LANDLOCK` | `n` | `y` | LSM de base de la liste par défaut du noyau |

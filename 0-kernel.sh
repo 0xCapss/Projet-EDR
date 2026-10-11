@@ -20,6 +20,10 @@ make defconfig
 scripts/config --enable BPF_SYSCALL --enable BPF_JIT --enable BPF_LSM
 scripts/config --disable DEBUG_INFO_NONE --enable DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT --enable DEBUG_INFO_BTF
 
+# Les programmes BPF-LSM s'attachent par trampoline BPF : il faut que les
+# fonctions noyau aient un emplacement patchable (sinon attach -> EBUSY)
+scripts/config --enable FUNCTION_TRACER --enable DYNAMIC_FTRACE
+
 # LSM actifs
 scripts/config --enable SECURITY_YAMA --enable SECURITY_LOCKDOWN_LSM --enable SECURITY_LANDLOCK
 scripts/config --set-str LSM "landlock,lockdown,yama,bpf"
@@ -31,7 +35,8 @@ scripts/config --enable SECURITYFS --enable IKCONFIG --enable IKCONFIG_PROC
 
 make olddefconfig
 
-for opt in BPF_SYSCALL BPF_JIT BPF_LSM DEBUG_INFO_BTF SECURITYFS IKCONFIG_PROC; do
+for opt in BPF_SYSCALL BPF_JIT BPF_LSM DEBUG_INFO_BTF SECURITYFS IKCONFIG_PROC \
+	FUNCTION_TRACER DYNAMIC_FTRACE DYNAMIC_FTRACE_WITH_DIRECT_CALLS; do
 	[ "$(scripts/config --state "$opt")" = y ] || { echo "CONFIG_$opt n'est pas activé"; exit 1; }
 done
 grep -q '^CONFIG_LSM=.*bpf' .config || { echo "bpf absent de CONFIG_LSM"; exit 1; }
