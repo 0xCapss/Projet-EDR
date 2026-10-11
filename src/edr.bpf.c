@@ -18,7 +18,7 @@ char LICENSE[] SEC("license") = "GPL";
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
-	__uint(max_entries, 1 << 24);   /* 16 MiB */
+	__uint(max_entries, 1 << 24);	/* 16 MiB */
 } events SEC(".maps");
 
 struct {
@@ -29,17 +29,17 @@ struct {
 } jail_map SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 256);
-    __type(key,   struct exec_key);
-    __type(value, __u32);
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 256);
+	__type(key,   struct exec_key);
+	__type(value, __u32);
 } exec_blacklist_map SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key,   __u32);
-    __type(value, struct pid_stats);
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key,   __u32);
+	__type(value, struct pid_stats);
 } pid_stats_map SEC(".maps");
 
 /* Events dropped because the ring buffer was full (slot 0) */
@@ -52,10 +52,10 @@ struct {
 
 /* PID of the daemon to protect (slot 0), written by edrd at startup; 0 = none */
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
-    __type(key,   __u32);
-    __type(value, __u32);
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key,   __u32);
+	__type(value, __u32);
 } protected_pid_map SEC(".maps");
 
 static __always_inline void lost_inc(void)
@@ -72,20 +72,20 @@ static __always_inline void stats_inc(__u32 pid, __u32 action)
 	/* Only alerts and blocks are counted: do not fill the map with allows */
 	if (action != ACTION_SIGNAL && action != ACTION_BLOCK)
 		return;
-    struct pid_stats *stats = bpf_map_lookup_elem(&pid_stats_map, &pid);
-    if (!stats) {
-        struct pid_stats new_stats = {};
-        bpf_map_update_elem(&pid_stats_map, &pid, &new_stats, BPF_NOEXIST);
-        stats = bpf_map_lookup_elem(&pid_stats_map, &pid);
-        if (!stats) {
-            return;
-        }
-    }
-    if (action == ACTION_SIGNAL) {
-        __sync_fetch_and_add(&stats->alerts, 1);
-    } else if (action == ACTION_BLOCK) {
-        __sync_fetch_and_add(&stats->blocks, 1);
-    }
+	struct pid_stats *stats = bpf_map_lookup_elem(&pid_stats_map, &pid);
+	if (!stats) {
+		struct pid_stats new_stats = {};
+		bpf_map_update_elem(&pid_stats_map, &pid, &new_stats, BPF_NOEXIST);
+		stats = bpf_map_lookup_elem(&pid_stats_map, &pid);
+		if (!stats) {
+			return;
+		}
+	}
+	if (action == ACTION_SIGNAL) {
+		__sync_fetch_and_add(&stats->alerts, 1);
+	} else if (action == ACTION_BLOCK) {
+		__sync_fetch_and_add(&stats->blocks, 1);
+	}
 }
 
 /* Compare len bytes of a and b (len includes the terminating NUL) */
@@ -217,18 +217,17 @@ int BPF_PROG(exec_hook, struct linux_binprm *bprm)
 
 /* —— Hook task_kill ———————————————————————— */
 
-
-
 static __always_inline int is_signal_allowed(int sig)
 {
-	if (sig == SIGKILL || sig == SIGSTOP || sig == SIGINT || sig == SIGTERM || sig == SIGQUIT)
+	if (sig == SIGKILL || sig == SIGSTOP || sig == SIGINT || sig == SIGTERM ||
+	    sig == SIGQUIT)
 		return 0;
-	else
-		return 1;
+	return 1;
 }
 
 SEC("lsm/task_kill")
-int BPF_PROG(task_kill_hook, struct task_struct *p, struct siginfo *info, int sig, const struct cred *cred)
+int BPF_PROG(task_kill_hook, struct task_struct *p, struct kernel_siginfo *info,
+	     int sig, const struct cred *cred)
 {
 	__u32 zero = 0;
 	__u32 *daemon = bpf_map_lookup_elem(&protected_pid_map, &zero);
@@ -236,19 +235,19 @@ int BPF_PROG(task_kill_hook, struct task_struct *p, struct siginfo *info, int si
 	struct event *e;
 	u32 target = BPF_CORE_READ(p, tgid);
 	u32 sender = bpf_get_current_pid_tgid() >> 32;
-	
-	if(!daemon || *daemon == 0)
+
+	if (!daemon || *daemon == 0)
 		return 0;
-	
-	if(target != *daemon)
+
+	if (target != *daemon)
 		return 0;
-	
-	if(sender == 1 || sender == *daemon)
+
+	if (sender == 1 || sender == *daemon)
 		return 0;
 
 	if (is_signal_allowed(sig))
 		return 0;
-	
+
 	stats_inc(sender, ACTION_BLOCK);
 
 	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
