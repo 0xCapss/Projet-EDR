@@ -20,4 +20,3 @@ Wazuh/*/single-node/config/wazuh_indexer_ssl_certs/
 # Binaires de l'EDR (régénérés par la compilation)
 src/edrd
 src/edrctl
-.claude
