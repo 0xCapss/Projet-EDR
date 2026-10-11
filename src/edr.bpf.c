@@ -35,8 +35,28 @@ struct {
     __type(value, struct pid_stats);
 } pid_stats_map SEC(".maps");
 
+/* Events dropped because the ring buffer was full (slot 0) */
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key,   __u32);
+	__type(value, __u64);
+} lost_events SEC(".maps");
+
+static __always_inline void lost_inc(void)
+{
+	__u32 zero = 0;
+	__u64 *lost = bpf_map_lookup_elem(&lost_events, &zero);
+
+	if (lost)
+		__sync_fetch_and_add(lost, 1);
+}
+
 static __always_inline void stats_inc(__u32 pid, __u32 action)
 {
+	/* Only alerts and blocks are counted: do not fill the map with allows */
+	if (action != ACTION_SIGNAL && action != ACTION_BLOCK)
+		return;
     struct pid_stats *stats = bpf_map_lookup_elem(&pid_stats_map, &pid);
     if (!stats) {
         struct pid_stats new_stats = {};
@@ -65,66 +85,75 @@ static __always_inline int bytes_equal(const char *a, const char *b, int len)
 	return 1;
 }
 
-/* —— Hook bprm_file_open ———————————————————————— */
+/*
+ * The decision (ret) is always taken before the ring buffer is used: a full
+ * buffer loses the log line, never the block.
+ */
+
+/* —— Hook file_open ———————————————————————————————— */
 
 SEC("lsm/file_open")
 int BPF_PROG(file_open_hook, struct file *file)
 {
 	static const char shadow_path[] = "/etc/shadow";
+	char path[MAX_PATH_LEN];
 	struct task_struct *t;
 	struct jail_policy *p;
 	struct event *e;
-	long n;
-	int ret = 0;
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 uid = (u32)bpf_get_current_uid_gid();
+	u32 action = 0;
+	int ret = 0;
+	long n;
 
-	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
-	if (!e)
+	n = bpf_d_path((struct path *)&file->f_path, path, sizeof(path));
+	if (n < 0)
 		return 0;
-
-	__builtin_memset(e, 0, sizeof(*e));
-	e->type = EVENT_FILE_OPEN;
-	e->pid = pid;
-	e->uid = (u32)bpf_get_current_uid_gid();
-	e->timestamp = bpf_ktime_get_ns();
-	bpf_get_current_comm(&e->comm, sizeof(e->comm));
-
-	t = (struct task_struct *)bpf_get_current_task_btf();
-	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
-
-	n = bpf_d_path((struct path *)&file->f_path, e->path, sizeof(e->path));
-	if (n < 0) {
-		bpf_ringbuf_discard(e, 0);
-		return 0;
-	}
 
 	/* Confined process: block the forbidden prefixes */
 	p = bpf_map_lookup_elem(&jail_map, &pid);
 	if (p) {
-		if ((p->flags & JAIL_BLOCK_PROC) && bytes_equal(e->path, "/proc/", 6)) {
+		if ((p->flags & JAIL_BLOCK_PROC) && bytes_equal(path, "/proc/", 6)) {
 			ret = -EPERM;
-			e->action = ACTION_BLOCK;
-		} else if ((p->flags & JAIL_BLOCK_ETC) && bytes_equal(e->path, "/etc/", 5)) {
+			action = ACTION_BLOCK;
+		} else if ((p->flags & JAIL_BLOCK_ETC) && bytes_equal(path, "/etc/", 5)) {
 			ret = -EPERM;
-			e->action = ACTION_BLOCK;
-		} else if ((p->flags & JAIL_BLOCK_ROOT) && bytes_equal(e->path, "/root/", 6)) {
+			action = ACTION_BLOCK;
+		} else if ((p->flags & JAIL_BLOCK_ROOT) && bytes_equal(path, "/root/", 6)) {
 			ret = -EPERM;
-			e->action = ACTION_BLOCK;
+			action = ACTION_BLOCK;
 		}
 	}
 
 	/* Unprivileged read of /etc/shadow: alert only (len includes the NUL) */
-	if (e->action == 0 && e->uid != 0 &&
-	    bytes_equal(e->path, shadow_path, sizeof(shadow_path)))
-		e->action = ACTION_SIGNAL;
+	if (action == 0 && uid != 0 &&
+	    bytes_equal(path, shadow_path, sizeof(shadow_path)))
+		action = ACTION_SIGNAL;
 
-	/* Nothing to report: do not flood the ring buffer */
-	if (e->action == 0) {
-		bpf_ringbuf_discard(e, 0);
+	/* Nothing to report: do not touch the ring buffer */
+	if (action == 0)
 		return 0;
+
+	stats_inc(pid, action);
+
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		lost_inc();
+		return ret;
 	}
 
-	stats_inc(pid, e->action);
+	__builtin_memset(e, 0, sizeof(*e));
+	e->type = EVENT_FILE_OPEN;
+	e->pid = pid;
+	e->uid = uid;
+	e->action = action;
+	e->timestamp = bpf_ktime_get_ns();
+	bpf_get_current_comm(&e->comm, sizeof(e->comm));
+	bpf_probe_read_kernel_str(e->path, sizeof(e->path), path);
+
+	t = (struct task_struct *)bpf_get_current_task_btf();
+	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
+
 	bpf_ringbuf_submit(e, 0);
 	return ret;
 }
@@ -134,35 +163,40 @@ int BPF_PROG(file_open_hook, struct file *file)
 SEC("lsm/bprm_check_security")
 int BPF_PROG(exec_hook, struct linux_binprm *bprm)
 {
-	struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	struct exec_key key = {};
+	struct task_struct *t;
+	struct event *e;
 	u32 pid = bpf_get_current_pid_tgid() >> 32;
-	if (!e)
-		return 0;
+	u32 action = ACTION_ALLOW;
+	int ret = 0;
+
+	key.inode = BPF_CORE_READ(bprm->file, f_inode, i_ino);
+	key.dev = BPF_CORE_READ(bprm->file, f_inode, i_sb, s_dev);
+
+	if (bpf_map_lookup_elem(&exec_blacklist_map, &key)) {
+		action = ACTION_BLOCK;
+		ret = -EPERM;
+	}
+	stats_inc(pid, action);
+
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		lost_inc();
+		return ret;
+	}
 
 	__builtin_memset(e, 0, sizeof(*e));
 	e->type = EVENT_EXEC;
 	e->pid = pid;
-	e->uid = (u32) bpf_get_current_uid_gid();
+	e->uid = (u32)bpf_get_current_uid_gid();
+	e->action = action;
 	e->timestamp = bpf_ktime_get_ns();
-	e->action = ACTION_ALLOW;	/* default, may become ACTION_BLOCK */
 	bpf_probe_read_kernel_str(e->path, sizeof(e->path), bprm->filename);
 	bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
-	struct task_struct *t = (struct task_struct *) bpf_get_current_task_btf();
-	e->ppid = BPF_CORE_READ(t,real_parent, tgid);
+	t = (struct task_struct *)bpf_get_current_task_btf();
+	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
 
-	struct exec_key key = {};
-	key.inode = BPF_CORE_READ(bprm->file, f_inode, i_ino);
-	key.dev = BPF_CORE_READ(bprm->file, f_inode, i_sb, s_dev);
-
-	int ret = 0;
-	__u32 *blacklisted = bpf_map_lookup_elem(&exec_blacklist_map, &key);
-	if (blacklisted) {
-		e->action = ACTION_BLOCK;
-		ret = -EPERM;
-	}
-	stats_inc(pid, e->action);
 	bpf_ringbuf_submit(e, 0);
 	return ret;
 }
-
