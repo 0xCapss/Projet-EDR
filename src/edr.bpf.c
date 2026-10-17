@@ -4,6 +4,7 @@
 #include <bpf/bpf_core_read.h>
 #include "edr.h"
 #include <linux/errno.h>
+#include <bpf/bpf_endian.h>
 
 #define SIGHUP        1
 #define SIGINT        2
@@ -11,6 +12,7 @@
 #define SIGKILL       9
 #define SIGTERM       15
 #define SIGSTOP       19
+#define AF_INET       2
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -41,6 +43,14 @@ struct {
 	__type(key,   __u32);
 	__type(value, struct pid_stats);
 } pid_stats_map SEC(".maps");
+
+/* Blocked destination IPv4 addresses, in network byte order */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 256);
+	__type(key,   __u32);
+	__type(value, __u32);
+} ip_blacklist_map SEC(".maps");
 
 /* Events dropped because the ring buffer was full (slot 0) */
 struct {
@@ -124,6 +134,7 @@ int BPF_PROG(file_open_hook, struct file *file)
 	n = bpf_d_path((struct path *)&file->f_path, path, sizeof(path));
 	if (n < 0)
 		return 0;
+
 	/* Confined process: block the forbidden prefixes */
 	p = bpf_map_lookup_elem(&jail_map, &pid);
 	if (p) {
@@ -164,7 +175,6 @@ int BPF_PROG(file_open_hook, struct file *file)
 	e->timestamp = bpf_ktime_get_ns();
 	bpf_get_current_comm(&e->comm, sizeof(e->comm));
 	bpf_probe_read_kernel_str(e->path, sizeof(e->path), path);
-
 	t = (struct task_struct *)bpf_get_current_task_btf();
 	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
 
@@ -265,8 +275,60 @@ int BPF_PROG(task_kill_hook, struct task_struct *p, struct kernel_siginfo *info,
 	bpf_get_current_comm(&e->comm, sizeof(e->comm));
 	bpf_probe_read_kernel_str(e->path, sizeof(e->path), p->comm);
 	t = (struct task_struct *)bpf_get_current_task_btf();
-
 	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
+
+	bpf_ringbuf_submit(e, 0);
+	return -EPERM;
+}
+
+/* —— Hook socket_connect ———————————————————————— */
+
+SEC("lsm/socket_connect")
+int BPF_PROG(socket_connect_hook, struct socket *sock, struct sockaddr *address,
+	     int addrlen)
+{
+	static const char format[] = "%pI4:%u";
+	struct sockaddr_in sin = {};
+	struct task_struct *t;
+	struct event *e;
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	u32 *blocked;
+	u64 args[2];
+
+	if (addrlen < (int)sizeof(struct sockaddr_in))
+		return 0;
+
+	bpf_probe_read_kernel(&sin, sizeof(sin), address);
+	if (sin.sin_family != AF_INET)
+		return 0;
+
+	/* Only blacklisted destinations reach the ring buffer */
+	blocked = bpf_map_lookup_elem(&ip_blacklist_map, &sin.sin_addr.s_addr);
+	if (!blocked)
+		return 0;
+
+	stats_inc(pid, ACTION_BLOCK);
+
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		lost_inc();
+		return -EPERM;
+	}
+
+	__builtin_memset(e, 0, sizeof(*e));
+	e->type = EVENT_NET_CONNECT;
+	e->action = ACTION_BLOCK;
+	e->pid = pid;
+	e->uid = (u32)bpf_get_current_uid_gid();
+	e->timestamp = bpf_ktime_get_ns();
+	bpf_get_current_comm(&e->comm, sizeof(e->comm));
+	t = (struct task_struct *)bpf_get_current_task_btf();
+	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
+
+	/* "ip:port" in path: %pI4 reads the address through a pointer */
+	args[0] = (u64)&sin.sin_addr.s_addr;
+	args[1] = bpf_ntohs(sin.sin_port);
+	bpf_snprintf(e->path, sizeof(e->path), format, args, sizeof(args));
 
 	bpf_ringbuf_submit(e, 0);
 	return -EPERM;
