@@ -180,7 +180,10 @@ static int set_pin_paths(struct edr *skel)
 	int n;
 
 	bpf_object__for_each_map(map, skel->obj) {
-		if (bpf_map__type(map) == BPF_MAP_TYPE_RINGBUF)
+		/* The ring buffer is not shared; internal maps (.rodata, .bss)
+		 * have a dot in their name, which bpffs refuses */
+		if (bpf_map__type(map) == BPF_MAP_TYPE_RINGBUF ||
+		    bpf_map__is_internal(map))
 			continue;
 		n = snprintf(path, sizeof(path), "%s/%s", EDR_PIN_DIR, bpf_map__name(map));
 		if (n < 0 || (size_t)n >= sizeof(path) || bpf_map__set_pin_path(map, path)) {
