@@ -16,6 +16,7 @@
 #define ATTR_MODE     (1 << 0)
 #define S_ISUID       0004000
 #define S_ISGID       0002000
+#define PTRACE_MODE_ATTACH 0x02
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -374,10 +375,57 @@ int BPF_PROG(setattr_hook, struct mnt_idmap *idmap, struct dentry *dentry,
 	t = (struct task_struct *)bpf_get_current_task_btf();
 	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
 
-	/* No d_path in this hook: only the file name is available */
 	bpf_probe_read_kernel_str(e->path, sizeof(e->path),
 				  BPF_CORE_READ(dentry, d_name.name));
 
 	bpf_ringbuf_submit(e, 0);
 	return 0;
+}
+
+/* —— Hook ptrace_access_check ———————————————————————— */
+
+SEC("lsm/ptrace_access_check")
+int BPF_PROG(ptrace_access_check_hook, struct task_struct *child,
+	     unsigned int mode)
+{
+	__u32 zero = 0;
+	__u32 *daemon = bpf_map_lookup_elem(&protected_pid_map, &zero);
+	struct task_struct *t;
+	struct event *e;
+	u32 target = BPF_CORE_READ(child, tgid);
+	u32 caller = bpf_get_current_pid_tgid() >> 32;
+
+	if (!daemon || *daemon == 0)
+		return 0;
+	if (target != *daemon)
+		return 0;
+
+	/* Reads (ps, /proc/<pid>/exe) stay allowed: only attaching is refused */
+	if (!(mode & PTRACE_MODE_ATTACH))
+		return 0;
+	if (caller == *daemon)
+		return 0;
+
+	stats_inc(caller, ACTION_BLOCK);
+
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		lost_inc();
+		return -EPERM;
+	}
+
+	__builtin_memset(e, 0, sizeof(*e));
+	e->type = EVENT_PTRACE;
+	e->action = ACTION_BLOCK;
+	e->pid = caller;
+	e->uid = (u32)bpf_get_current_uid_gid();
+	e->timestamp = bpf_ktime_get_ns();
+	bpf_get_current_comm(&e->comm, sizeof(e->comm));
+	t = (struct task_struct *)bpf_get_current_task_btf();
+	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
+	bpf_probe_read_kernel_str(e->path, sizeof(e->path),
+				  BPF_CORE_READ(child, comm));
+
+	bpf_ringbuf_submit(e, 0);
+	return -EPERM;
 }
