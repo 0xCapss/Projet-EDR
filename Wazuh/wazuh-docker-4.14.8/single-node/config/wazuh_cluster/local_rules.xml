@@ -5,3 +5,91 @@
         <description>EDR : événement de test reçu de la VM</description>
     </rule>
 </group>
+
+<!--
+  Règles EDR. Les lignes de /var/log/edr.log sont décodées par le décodeur JSON
+  de Wazuh. "action" est un champ statique de Wazuh : on le teste avec <match>
+  sur le texte de la ligne, pas avec <field>.
+  Niveaux : 3 information, 8 alerte, 10 blocage, 12 atteinte à l'EDR lui-même.
+-->
+<group name="edr,">
+
+  <rule id="100020" level="10">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^socket_connect$</field>
+    <match>"action":"block"</match>
+    <description>EDR : connexion bloquée vers $(path) par $(comm) (pid $(pid), uid $(uid))</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+  </rule>
+
+  <rule id="100021" level="10">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^inode_setattr$</field>
+    <match>"action":"signal"</match>
+    <description>EDR : bit setuid/setgid posé sur $(path) par $(comm)</description>
+    <mitre>
+      <id>T1548.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100022" level="10">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^bprm_check_security$</field>
+    <match>"action":"block"</match>
+    <description>EDR : exécution bloquée de $(path) par $(comm) (pid $(pid), uid $(uid))</description>
+  </rule>
+
+  <rule id="100023" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^task_kill$</field>
+    <match>"action":"block"</match>
+    <description>EDR : $(comm) (pid $(pid), uid $(uid)) a tenté de tuer $(path)</description>
+    <mitre>
+      <id>T1562.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100024" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^ptrace_access_check$</field>
+    <match>"action":"block"</match>
+    <description>EDR : $(comm) (pid $(pid), uid $(uid)) a tenté de s'attacher à $(path)</description>
+    <mitre>
+      <id>T1055.008</id>
+    </mitre>
+  </rule>
+
+  <rule id="100025" level="8">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^file_open$</field>
+    <match>"action":"signal"</match>
+    <description>EDR : lecture de $(path) par $(comm) (pid $(pid), uid $(uid))</description>
+    <mitre>
+      <id>T1003.008</id>
+    </mitre>
+  </rule>
+
+  <rule id="100026" level="10">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^file_open$</field>
+    <match>"action":"block"</match>
+    <description>EDR : accès interdit à $(path) pour le processus confiné $(comm) (pid $(pid))</description>
+  </rule>
+
+  <rule id="100027" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^edrd$</field>
+    <match>"action":"stop"</match>
+    <description>EDR : le démon edrd s'est arrêté ($(msg))</description>
+  </rule>
+
+  <rule id="100028" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="hook">^edrd$</field>
+    <match>"action":"start"</match>
+    <description>EDR : le démon edrd a démarré ($(msg))</description>
+  </rule>
+
+</group>
