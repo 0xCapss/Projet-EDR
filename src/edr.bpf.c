@@ -13,6 +13,9 @@
 #define SIGTERM       15
 #define SIGSTOP       19
 #define AF_INET       2
+#define ATTR_MODE     (1 << 0)
+#define S_ISUID       0004000
+#define S_ISGID       0002000
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -332,4 +335,49 @@ int BPF_PROG(socket_connect_hook, struct socket *sock, struct sockaddr *address,
 
 	bpf_ringbuf_submit(e, 0);
 	return -EPERM;
+}
+
+/* —— Hook inode_setattr ———————————————————————— */
+
+SEC("lsm/inode_setattr")
+int BPF_PROG(setattr_hook, struct mnt_idmap *idmap, struct dentry *dentry,
+	     struct iattr *attr)
+{
+	struct task_struct *t;
+	struct event *e;
+	u32 pid = bpf_get_current_pid_tgid() >> 32;
+	unsigned int valid = BPF_CORE_READ(attr, ia_valid);
+	unsigned int mode = BPF_CORE_READ(attr, ia_mode);
+
+	/* Most calls (touch, truncate, chown...) stop here */
+	if (!(valid & ATTR_MODE))
+		return 0;
+	if (!(mode & (S_ISUID | S_ISGID)))
+		return 0;
+
+	/* Setuid/setgid bit being set: alert only, never block */
+	stats_inc(pid, ACTION_SIGNAL);
+
+	e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) {
+		lost_inc();
+		return 0;
+	}
+
+	__builtin_memset(e, 0, sizeof(*e));
+	e->type = EVENT_FILE_SETATTR;
+	e->pid = pid;
+	e->uid = (u32)bpf_get_current_uid_gid();
+	e->action = ACTION_SIGNAL;
+	e->timestamp = bpf_ktime_get_ns();
+	bpf_get_current_comm(&e->comm, sizeof(e->comm));
+	t = (struct task_struct *)bpf_get_current_task_btf();
+	e->ppid = BPF_CORE_READ(t, real_parent, tgid);
+
+	/* No d_path in this hook: only the file name is available */
+	bpf_probe_read_kernel_str(e->path, sizeof(e->path),
+				  BPF_CORE_READ(dentry, d_name.name));
+
+	bpf_ringbuf_submit(e, 0);
+	return 0;
 }
