@@ -285,6 +285,19 @@ static void daemon_state_write(int fd, uint32_t pid, uint64_t start)
 		fprintf(stderr, "edrd: update %s: %s\n", EDR_DAEMON_MAP, strerror(errno));
 }
 
+/* —— Self-protection ————————————————————————————————————————— */
+
+/* task_kill and ptrace_access_check protect the PID found in slot 0 of
+ * protected_pid_map; 0 disables the protection */
+static void protect_pid(struct edr *skel, uint32_t pid)
+{
+	uint32_t zero = 0;
+
+	if (bpf_map__update_elem(skel->maps.protected_pid_map, &zero, sizeof(zero),
+				 &pid, sizeof(pid), BPF_ANY) < 0)
+		fprintf(stderr, "edrd: update protected_pid_map: %s\n", strerror(errno));
+}
+
 /* —— Events ————————————————————————————————————————————————— */
 
 static int handle_event(void *ctx, void *data, size_t size)
@@ -370,6 +383,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "edrd: no hook attached\n");
 		goto cleanup;
 	}
+	protect_pid(skel, (uint32_t)getpid());
 
 	err = log_open(EDR_LOG_PATH);
 	if (err)
@@ -415,6 +429,8 @@ int main(int argc, char **argv)
 	}
 
 	/* The hooks stay attached: blocking goes on without edrd */
+	/* A recycled PID must not inherit the protection */
+	protect_pid(skel, 0);
 	daemon_state_write(state_fd, 0, start);
 	log_daemon("stop", "stopped, hooks left attached", opts.foreground);
 	ret = 0;

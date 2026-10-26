@@ -161,8 +161,14 @@ int log_format_event(const struct event *e, char *buf, size_t size)
 
 /* —— File ———————————————————————————————————————————————— */
 
-/* Open log_path, then swap it with the current descriptor */
-static int log_reopen(void)
+/*
+ * Open log_path, then swap it with the current descriptor.
+ * The owner and mode chosen at install time are kept (root:adm 0640, so
+ * that rsyslog can read the file after dropping its privileges); only
+ * the bits for others and group write are removed. tmpl, when given, is
+ * the file being rotated: the new file gets its owner and mode.
+ */
+static int log_reopen(const struct stat *tmpl)
 {
 	struct stat st;
 	int fd;
@@ -171,15 +177,24 @@ static int log_reopen(void)
 	fd = open(log_path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
 	if (fd < 0)
 		return -errno;
-	if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) || fchmod(fd, 0600) < 0) {
-		close(fd);
-		return -EINVAL;
+	if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode))
+		goto fail;
+	if (tmpl) {
+		if (fchown(fd, tmpl->st_uid, tmpl->st_gid) < 0 ||
+		    fchmod(fd, tmpl->st_mode & 0640) < 0)
+			goto fail;
+	} else if ((st.st_mode & 07777) & ~0640U) {
+		if (fchmod(fd, st.st_mode & 0640) < 0)
+			goto fail;
 	}
 
 	log_close();
 	log_fd = fd;
 	log_size = st.st_size;
 	return 0;
+fail:
+	close(fd);
+	return -EINVAL;
 }
 
 int log_open(const char *path)
@@ -189,7 +204,7 @@ int log_open(const char *path)
 	n = snprintf(log_path, sizeof(log_path), "%s", path);
 	if (n < 0 || (size_t)n >= sizeof(log_path))
 		return -ENAMETOOLONG;
-	return log_reopen();
+	return log_reopen(NULL);
 }
 
 void log_close(void)
@@ -203,10 +218,13 @@ int log_rotate_if_needed(void)
 {
 	char from[PATH_MAX + 8];
 	char to[PATH_MAX + 8];
+	struct stat old;
 	int i;
 
 	if (log_fd < 0 || log_size < LOG_MAX_SIZE)
 		return 0;
+	if (fstat(log_fd, &old) < 0)
+		return -errno;
 
 	for (i = LOG_KEEP - 1; i >= 1; i--) {
 		snprintf(from, sizeof(from), "%s.%d", log_path, i);
@@ -217,7 +235,7 @@ int log_rotate_if_needed(void)
 	snprintf(to, sizeof(to), "%s.1", log_path);
 	if (rename(log_path, to) < 0)
 		return -errno;
-	return log_reopen();
+	return log_reopen(&old);
 }
 
 static int write_all(int fd, const char *buf, size_t len)
