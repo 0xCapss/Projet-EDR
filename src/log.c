@@ -15,6 +15,7 @@
 
 static int log_fd = -1;
 static off_t log_size;
+static int rotation_failed;	/* stop rotating until the log is reopened */
 static char log_path[PATH_MAX];
 
 /* Bounded string builder: on overflow the line is dropped, never truncated */
@@ -167,6 +168,8 @@ int log_format_event(const struct event *e, char *buf, size_t size)
  * that rsyslog can read the file after dropping its privileges); only
  * the bits for others and group write are removed. tmpl, when given, is
  * the file being rotated: the new file gets its owner and mode.
+ * Failing to set them is not fatal (a confined edrd may lack CAP_CHOWN):
+ * the log goes on in the new file, and the failure is reported.
  */
 static int log_reopen(const struct stat *tmpl)
 {
@@ -177,24 +180,25 @@ static int log_reopen(const struct stat *tmpl)
 	fd = open(log_path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
 	if (fd < 0)
 		return -errno;
-	if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode))
-		goto fail;
+	if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode)) {
+		close(fd);
+		return -EINVAL;
+	}
 	if (tmpl) {
-		if (fchown(fd, tmpl->st_uid, tmpl->st_gid) < 0 ||
-		    fchmod(fd, tmpl->st_mode & 0640) < 0)
-			goto fail;
+		if (fchown(fd, tmpl->st_uid, tmpl->st_gid) < 0)
+			fprintf(stderr, "edrd: chown %s: %s\n", log_path, strerror(errno));
+		if (fchmod(fd, tmpl->st_mode & 0640) < 0)
+			fprintf(stderr, "edrd: chmod %s: %s\n", log_path, strerror(errno));
 	} else if ((st.st_mode & 07777) & ~0640U) {
 		if (fchmod(fd, st.st_mode & 0640) < 0)
-			goto fail;
+			fprintf(stderr, "edrd: chmod %s: %s\n", log_path, strerror(errno));
 	}
 
 	log_close();
 	log_fd = fd;
 	log_size = st.st_size;
+	rotation_failed = 0;
 	return 0;
-fail:
-	close(fd);
-	return -EINVAL;
 }
 
 int log_open(const char *path)
@@ -221,8 +225,13 @@ int log_rotate_if_needed(void)
 	struct stat old;
 	int i;
 
-	if (log_fd < 0 || log_size < LOG_MAX_SIZE)
+	/*
+	 * After a failure, retrying every heartbeat would shift the archives
+	 * again and again and lose them: wait for log_open() (SIGHUP, restart)
+	 */
+	if (log_fd < 0 || log_size < LOG_MAX_SIZE || rotation_failed)
 		return 0;
+	rotation_failed = 1;
 	if (fstat(log_fd, &old) < 0)
 		return -errno;
 
