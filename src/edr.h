@@ -60,3 +60,19 @@ struct pid_stats{
     __u64 alerts; /* events flagged ACTION_SIGNAL */
     __u64 blocks; /* events flagged ACTION_BLOCK */
 };
+
+/* —— Daemon (edrd) ——————————————————————————————————————————— */
+
+#define EDR_PIN_DIR		"/sys/fs/bpf/edr"	/* maps pinned by name */
+#define EDR_LINK_DIR		EDR_PIN_DIR "/links"	/* one pinned link per active hook */
+#define EDR_DAEMON_MAP		"daemon_state"
+#define EDR_LOG_PATH		"/var/log/edr.log"
+
+/* EDR_PIN_DIR/daemon_state: array of 1, created and written by edrd only */
+struct daemon_state {
+	__u32 pid;		/* 0 when edrd is not running */
+	__u32 reserved;
+	__u64 start_time;	/* seconds since the epoch */
+	__u64 heartbeat;	/* seconds since the epoch, refreshed every few seconds */
+	__u64 events_logged;
+};

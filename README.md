@@ -71,6 +71,20 @@ Dashboard : `https://localhost`)
 
 Les certificats générés ne sont pas versionnés.
 
+## EDR (`src/`)
+
+Prérequis supplémentaires sur l'hôte : `clang`, `bpftool`, `libbpf-dev`. `make -C src` génère `vmlinux.h` depuis le BTF du noyau compilé, puis `edr.bpf.o`, le squelette et `edrd` (libbpf liée statiquement). `3-install.sh` installe `edrd` et le service `edrd`, activé au boot.
+
+| Fichier | Rôle |
+|---|---|
+| `edr.h` | événement, structures des maps, chemins de `edrd` dans `/sys/fs/bpf/edr/` |
+| `edr.bpf.c` | hooks BPF-LSM |
+| `edrd.c` | charge le BPF, épingle les maps (`/sys/fs/bpf/edr/<map>`) et les liens (`/sys/fs/bpf/edr/links/<hook>`), lit le ring buffer, écrit `/var/log/edr.log` ; état du démon dans la map `daemon_state` |
+| `log.c`, `log.h` | une ligne JSON par événement (`time`, `hook`, `event`, `action`, `pid`, `ppid`, `uid`, `comm`, `path`), échappement, rotation à 10 Mio × 5 |
+| `edrd.service` | unité systemd, redémarrage automatique |
+
+Les liens sont épinglés : si `edrd` s'arrête, le blocage continue et les maps sont réutilisées au redémarrage. `edrd -u` détache tous les hooks et supprime `/sys/fs/bpf/edr/`.
+
 ## Contenu du dépôt
 
 ```
@@ -79,6 +93,7 @@ issue-edr2600                      bannière de connexion
 kernel/defconfig-edr               configuration minimale du noyau
 kernel/config-edr.annoté.md        options retenues et justification
 Wazuh/…/single-node/               SIEM (Docker Compose, configuration, règles)
+src/                               EDR : edr.bpf.c, edrd, configuration, service
 20261001-edr.pdf                   sujet
 architecture-miniEDR.pdf           architecture cible
 ```
