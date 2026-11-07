@@ -1,6 +1,9 @@
 # Mini EDR - Noyau Linux (École 2600)
 
-EDR minimal pour Linux reposant sur BPF-LSM. Ce dépôt contient la plateforme de test (noyau, image LFS) et, à terme, l'EDR (`edr.bpf.c`, `edrd`, `edrctl`).
+EDR minimal pour Linux reposant sur BPF-LSM. Ce dépôt contient la plateforme de test (noyau, image LFS) et l'EDR (`edr.bpf.c`, `edrd`, `edrctl`).
+
+- [Guide d'utilisation](docs/utilisation.md) : démarrer l'EDR, utiliser `edrctl`, lire les alertes, scénarios de démo
+- [Rapport de conception](docs/rapport.md)
 
 
 ## Plateforme
@@ -72,7 +75,7 @@ Les certificats générés ne sont pas versionnés.
 
 ## EDR (`src/`)
 
-Prérequis supplémentaires sur l'hôte : `clang`, `bpftool`, `libbpf-dev`. `make -C src` génère `vmlinux.h` depuis le BTF du noyau compilé, puis `edr.bpf.o`, le squelette et `edrd` (libbpf liée statiquement). `3-install.sh` installe `edrd` et le service `edrd`, activé au boot.
+Prérequis supplémentaires sur l'hôte : `clang`, `bpftool`, `libbpf-dev`. `make -C src` génère `vmlinux.h` depuis le BTF du noyau compilé, puis `edr.bpf.o`, le squelette, `edrd` et `edrctl` (libbpf liée statiquement). `3-install.sh` installe les deux binaires et le service `edrd`, activé au boot.
 
 | Fichier | Rôle |
 |---|---|
@@ -80,6 +83,7 @@ Prérequis supplémentaires sur l'hôte : `clang`, `bpftool`, `libbpf-dev`. `mak
 | `edr.bpf.c` | hooks BPF-LSM |
 | `edrd.c` | charge le BPF, épingle les maps (`/sys/fs/bpf/edr/<map>`) et les liens (`/sys/fs/bpf/edr/links/<hook>`), lit le ring buffer, écrit `/var/log/edr.log` ; état du démon dans la map `daemon_state` |
 | `log.c`, `log.h` | une ligne JSON par événement (`time`, `hook`, `event`, `action`, `pid`, `ppid`, `uid`, `comm`, `path`), échappement, rotation à 10 Mio × 5 |
+| `edrctl.c` | outil de contrôle : `status`, `watch`, `block`, `jail`, `stats` (voir le guide) |
 | `edrd.service` | unité systemd, redémarrage automatique |
 
 Les liens sont épinglés : si `edrd` s'arrête, le blocage continue et les maps sont réutilisées au redémarrage. `edrd -u` détache tous les hooks et supprime `/sys/fs/bpf/edr/`.
@@ -92,7 +96,8 @@ issue-edr2600                      bannière de connexion
 kernel/defconfig-edr               configuration minimale du noyau
 kernel/config-edr.annoté.md        options retenues et justification
 Wazuh/…/single-node/               SIEM (Docker Compose, configuration, règles)
-src/                               EDR : edr.bpf.c, edrd, configuration, service
+src/                               EDR : edr.bpf.c, edrd, edrctl, service
+docs/                              guide d'utilisation et rapport de conception
 20261001-edr.pdf                   sujet
 architecture-miniEDR.pdf           architecture cible
 ```

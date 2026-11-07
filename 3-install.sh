@@ -38,7 +38,7 @@ EOF
 
 sudo ln -sf ../run/systemd/resolve/stub-resolv.conf "$MNT/etc/resolv.conf"
 
-# EDR : démon edrd, configuration et service systemd (démarré au boot)
+# EDR : démon edrd, outil edrctl et service systemd (démarré au boot)
 make -C src
 sudo make -C src install DESTDIR="$MNT"
 sudo cp issue-edr2600 "$MNT/etc/issue"

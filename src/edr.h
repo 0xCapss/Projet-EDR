@@ -52,8 +52,13 @@ struct jail_policy {
 
 struct exec_key {
     __u64 inode;
-    __u32 dev;
+    __u32 dev;			/* kernel encoding: (major << 20) | minor */
     __u32 pad;
+};
+
+/* Value of exec_blacklist_map: the path is only kept for edrctl block list */
+struct exec_rule {
+    char path[MAX_PATH_LEN];
 };
 
 struct pid_stats{
@@ -67,6 +72,13 @@ struct pid_stats{
 #define EDR_LINK_DIR		EDR_PIN_DIR "/links"	/* one pinned link per active hook */
 #define EDR_DAEMON_MAP		"daemon_state"
 #define EDR_LOG_PATH		"/var/log/edr.log"
+
+/* Maps pinned by edrd (EDR_PIN_DIR/<name>), used by edrctl */
+#define EDR_MAP_EXEC_BLACKLIST	"exec_blacklist_map"
+#define EDR_MAP_IP_BLACKLIST	"ip_blacklist_map"
+#define EDR_MAP_JAIL		"jail_map"
+#define EDR_MAP_PID_STATS	"pid_stats_map"
+#define EDR_MAP_LOST		"lost_events"
 
 /* EDR_PIN_DIR/daemon_state: array of 1, created and written by edrd only */
 struct daemon_state {
