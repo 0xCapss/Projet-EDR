@@ -3,7 +3,6 @@
 EDR minimal pour Linux reposant sur BPF-LSM. Ce dépôt contient la plateforme de test (noyau, image LFS) et l'EDR (`edr.bpf.c`, `edrd`, `edrctl`).
 
 - [Guide d'utilisation](docs/utilisation.md) : démarrer l'EDR, utiliser `edrctl`, lire les alertes, scénarios de démo
-- [Rapport de conception](docs/rapport.md)
 
 
 ## Plateforme
@@ -97,7 +96,7 @@ kernel/defconfig-edr               configuration minimale du noyau
 kernel/config-edr.annoté.md        options retenues et justification
 Wazuh/…/single-node/               SIEM (Docker Compose, configuration, règles)
 src/                               EDR : edr.bpf.c, edrd, edrctl, service
-docs/                              guide d'utilisation et rapport de conception
+docs/                              guide d'utilisation
 20261001-edr.pdf                   sujet
 architecture-miniEDR.pdf           architecture cible
 ```
