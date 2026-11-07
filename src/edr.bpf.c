@@ -38,7 +38,7 @@ struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 256);
 	__type(key,   struct exec_key);
-	__type(value, __u32);
+	__type(value, struct exec_rule);
 } exec_blacklist_map SEC(".maps");
 
 struct {

@@ -1,6 +1,6 @@
-# Mini EDR: BPF agent (edr.bpf.c) and daemon (edrd)
+# Mini EDR: BPF agent (edr.bpf.c), daemon (edrd) and control tool (edrctl)
 #
-#   make                  build edr.bpf.o, edr.skel.h and edrd
+#   make                  build edr.bpf.o, edr.skel.h, edrd and edrctl
 #   make install DESTDIR=/tmp/my-rootfs
 #
 # vmlinux.h is generated from the BTF of the target kernel, so that CO-RE
@@ -34,7 +34,7 @@ LDLIBS    = -Wl,-Bstatic -lbpf -Wl,-Bdynamic -lelf -lz
 
 .PHONY: all clean install
 
-all: edrd
+all: edrd edrctl
 
 vmlinux.h:
 	$(BPFTOOL) btf dump file $(VMLINUX) format c > $@
@@ -51,7 +51,12 @@ log.o: log.c log.h edr.h
 edrd: edrd.o log.o
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
 
-install: edrd
+edrctl.o: edrctl.c edr.h
+
+edrctl: edrctl.o
+	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+install: edrd edrctl
 	install -D -m 0755 edrd $(DESTDIR)$(PREFIX)/sbin/edrd
 	install -D -m 0644 edrd.service $(DESTDIR)/lib/systemd/system/edrd.service
 	install -d $(DESTDIR)/etc/systemd/system/multi-user.target.wants
@@ -59,4 +64,4 @@ install: edrd
 		$(DESTDIR)/etc/systemd/system/multi-user.target.wants/edrd.service
 
 clean:
-	rm -f edrd *.o edr.skel.h vmlinux.h
+	rm -f edrd edrctl *.o edr.skel.h vmlinux.h
