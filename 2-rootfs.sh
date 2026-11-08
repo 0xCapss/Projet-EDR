@@ -170,13 +170,25 @@ EOF
 systemctl mask ctrl-alt-del.target debug-shell.service
 
 # —— Pare-feu (ufw, règles iptables) ———————————————————————
-# Entrant et routé refusés (aucun service n'écoute). Sortant autorisé : le contrôle
-# des connexions sortantes est le rôle de l'EDR (socket_connect), qu'il doit rester visible.
-# Configuration écrite directement : ufw ne peut pas charger de règles dans le conteneur
+# Tout est refusé par défaut (entrant, sortant, routé) ; seuls sortent le DHCP vers QEMU
+# et le syslog TCP vers le manager Wazuh (10.0.2.2:514). Le hook socket_connect de l'EDR
+# s'exécute avant le pare-feu : il voit et journalise quand même les connexions qu'il bloque.
+# Configuration écrite directement : ufw ne peut pas charger de règles dans le conteneur.
+# Les lignes "### tuple ###" sont celles que ufw relit pour "ufw status"
 sed -i -E 's/^IPV6=.*/IPV6=no/' /etc/default/ufw
 sed -i -E 's/^DEFAULT_INPUT_POLICY=.*/DEFAULT_INPUT_POLICY="DROP"/' /etc/default/ufw
-sed -i -E 's/^DEFAULT_OUTPUT_POLICY=.*/DEFAULT_OUTPUT_POLICY="ACCEPT"/' /etc/default/ufw
+sed -i -E 's/^DEFAULT_OUTPUT_POLICY=.*/DEFAULT_OUTPUT_POLICY="DROP"/' /etc/default/ufw
 sed -i -E 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="DROP"/' /etc/default/ufw
+grep -q '^### RULES ###$' /etc/ufw/user.rules || { echo "/etc/ufw/user.rules inattendu"; exit 1; }
+sed -i '/^### RULES ###$/r /dev/stdin' /etc/ufw/user.rules <<'EOF'
+
+### tuple ### allow udp 67 0.0.0.0/0 68 0.0.0.0/0 out
+-A ufw-user-output -p udp --dport 67 --sport 68 -j ACCEPT
+
+### tuple ### allow tcp 514 10.0.2.2 any 0.0.0.0/0 out
+-A ufw-user-output -p tcp -d 10.0.2.2 --dport 514 -j ACCEPT
+EOF
+grep -q -- '-d 10.0.2.2 --dport 514 -j ACCEPT' /etc/ufw/user.rules || { echo "règle ufw Wazuh absente"; exit 1; }
 sed -i -E 's/^ENABLED=.*/ENABLED=yes/' /etc/ufw/ufw.conf
 sed -i -E 's/^LOGLEVEL=.*/LOGLEVEL=low/' /etc/ufw/ufw.conf
 grep -q '^ENABLED=yes' /etc/ufw/ufw.conf || { echo "ufw non activé"; exit 1; }
@@ -212,8 +224,9 @@ cat > /etc/apparmor.d/local/usr.sbin.rsyslogd <<'EOF'
 network inet stream,
 EOF
 
-# Profil du démon EDR, en mode complain tant que edrd n'est pas installé dans l'image :
-# à passer en enforce (aa-enforce) une fois les règles validées par aa-logprof
+# Profil du démon EDR (installé par 3-install.sh), en mode complain : les accès hors
+# profil sont journalisés, pas refusés. Le passer en enforce (aa-enforce) une fois que
+# "journalctl -k | grep edrd" ne montre plus d'ALLOWED, pour ne pas casser la démo
 cat > /etc/apparmor.d/usr.sbin.edrd <<'EOF'
 abi <abi/4.0>,
 include <tunables/global>
@@ -221,19 +234,28 @@ include <tunables/global>
 profile edrd /usr/sbin/edrd flags=(complain) {
   include <abstractions/base>
 
+  # Chargement des programmes BPF-LSM, ring buffer, épinglage
   capability bpf,
   capability perfmon,
   capability sys_admin,
   capability sys_resource,
+  # Rotation de edr.log : le nouveau fichier reprend root:adm 0640
+  capability chown,
+  capability fowner,
+
+  # bpffs, si bpffs.service ne l'a pas monté
+  mount fstype=bpf -> /sys/fs/bpf/,
 
   /usr/sbin/edrd mr,
   /sys/kernel/btf/vmlinux r,
   /sys/devices/system/cpu/possible r,
   /sys/devices/system/cpu/online r,
-  /proc/sys/kernel/unprivileged_bpf_disabled r,
+  @{PROC}/sys/kernel/unprivileged_bpf_disabled r,
+  @{PROC}/@{pid}/fdinfo/* r,
   /sys/fs/bpf/ r,
   /sys/fs/bpf/edr/ rw,
   /sys/fs/bpf/edr/** rw,
+  /var/log/ r,
   /var/log/edr.log rw,
   /var/log/edr.log.[0-9]* rw,
 
