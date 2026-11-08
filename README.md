@@ -20,7 +20,7 @@ La configuration du noyau et sa justification sont dans `kernel/defconfig-edr` e
 
 ```
 sudo apt install docker.io qemu-system-x86 qemu-utils parted e2fsprogs grub-pc-bin \
-    build-essential flex bison bc libelf-dev libssl-dev dwarves curl
+    build-essential flex bison bc libelf-dev libssl-dev dwarves curl cryptsetup-bin debootstrap parted e2fsprogs dosfstools grub-pc-bin grub-efi-amd64-bin
 ```
 
 Prévoir environ 15 Go libres (arbre du noyau compilé, image de 8 Go en fichier sparse) et 20 à 30 minutes pour la première compilation du noyau.
