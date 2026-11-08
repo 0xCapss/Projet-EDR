@@ -33,11 +33,15 @@ LDFLAGS  += -pie -Wl,-z,relro,-z,now
 LDLIBS    = -Wl,-Bstatic -lbpf -Wl,-Bdynamic -lelf -lz
 
 .PHONY: all clean install
+# A failed recipe must not leave a half-written target behind (an empty
+# vmlinux.h would be taken as up to date and break every later build)
+.DELETE_ON_ERROR:
 
 all: edrd edrctl
 
 vmlinux.h:
-	$(BPFTOOL) btf dump file $(VMLINUX) format c > $@
+	$(BPFTOOL) btf dump file $(VMLINUX) format c > $@.tmp
+	mv $@.tmp $@
 
 edr.bpf.o: edr.bpf.c edr.h vmlinux.h
 	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
@@ -58,6 +62,7 @@ edrctl: edrctl.o
 
 install: edrd edrctl
 	install -D -m 0755 edrd $(DESTDIR)$(PREFIX)/sbin/edrd
+	install -D -m 0755 edrctl $(DESTDIR)$(PREFIX)/sbin/edrctl
 	install -D -m 0644 edrd.service $(DESTDIR)/lib/systemd/system/edrd.service
 	install -d $(DESTDIR)/etc/systemd/system/multi-user.target.wants
 	ln -sf /lib/systemd/system/edrd.service \

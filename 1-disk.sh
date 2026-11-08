@@ -19,8 +19,10 @@ parted -s "$IMG" mklabel msdos \
 LOOP=$(sudo losetup -Pf --show "$IMG")
 echo "Périphérique : $LOOP"
 
-# Formater les partitions, jamais le disque entier
+# Formater les partitions, jamais le disque entier.
+# partprobe fait recréer loopXp1/p2 par udev : on attend qu'il ait fini avant mkfs
 sudo partprobe "$LOOP"
+sudo udevadm settle
 for part in "${LOOP}p1" "${LOOP}p2"; do
 	[ -b "$part" ] || { echo "$part absent"; exit 1; }
 done
